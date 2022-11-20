@@ -1,0 +1,11 @@
+version = 0.1
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "lok-test"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-1qedwj94lndi6"
+s3_prefix = "lok-test"
+region = "eu-west-1"
+capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+parameter_overrides = "LokBucketDataSourceName=\"lok-s3-raw-data\" LokBucketDataLakeName=\"lok-s3-data-lake\""
+image_repositories = []

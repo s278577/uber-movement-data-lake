@@ -1,0 +1,223 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  sam-app
+
+  Sample SAM Template for sam-app
+
+Parameters:
+  LokBucketDataSourceName:
+    Description: Bucket data source
+    Type: String
+    Default: lok-s3-raw-data
+  LokBucketDataLakeName:
+    Description: Bucket data lake
+    Type: String
+    Default: lok-s3-data-lake
+  LokPrefix:
+    Description: Database data lake
+    Type: String
+    Default: lok
+
+Resources:
+  RegionalRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${LokPrefix}-${AWS::Region}-role-regional
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - glue.amazonaws.com
+                - lambda.amazonaws.com
+                - !Sub states.${AWS::Region}.amazonaws.com
+                - !Sub logs.${AWS::Region}.amazonaws.com
+            Action:
+              - sts:AssumeRole
+  RegionalPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${LokPrefix}-${AWS::Region}-policy-regional
+      Roles:
+        - !Ref RegionalRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:        
+          - Sid: AllowS3
+            Effect: Allow
+            Action:
+              - s3:*Object
+              - s3:ListBucket
+              - s3:GetBucketLocation
+            Resource:
+              - !Sub "arn:aws:s3:::${LokBucketDataSourceName}/uber*"
+              - !Sub "arn:aws:s3:::${LokBucketDataLakeName}/uber*"
+              - "arn:aws:s3:::aws-sam-cli-managed-default-samclisourcebucket*"
+          - Action: [ 'glue:*' ]
+            Effect: Allow
+            Resource:
+              - !Sub arn:aws:s3:::${LokBucketDataSourceName}*
+              - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog
+              - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/${LokPrefix}*
+              - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/${LokPrefix}*
+            Sid: AllowGlue
+          - Effect: Allow
+            Action:
+              - glue:GetTable
+              - glue:GetTableVersion
+              - glue:GetTableVersions
+            Resource: "*"
+            Sid: AllowGenericGlueOperation
+          - Sid: AllowGetSecretValue
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:*
+          - Sid: AllowKMS
+            Effect: Allow
+            Action:
+              - kms:*
+            Resource: "*"
+  LokBucketDataSource:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref LokBucketDataSourceName
+      AccessControl: BucketOwnerFullControl
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              KMSMasterKeyID: !Ref MasterEncriptionKey
+              SSEAlgorithm: aws:kms
+  LokBucketDataLake:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref LokBucketDataLakeName
+      AccessControl: BucketOwnerFullControl
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              KMSMasterKeyID: !Ref MasterEncriptionKey
+              SSEAlgorithm: aws:kms
+  RawIngestFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: src/raw_ingest/
+      Handler: app.lambda_handler
+      FunctionName: !Sub ${LokPrefix}-raw-ingest-function
+      Role: !GetAtt RegionalRole.Arn
+      Runtime: python3.9
+      MemorySize: 4096
+      Timeout: 500
+      Environment:
+        Variables:
+          Raw_Bucket: !Ref LokBucketDataSourceName
+          DW_AUTH_TOKEN: eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiJweXRob246a2VubnkzMTA3ODkiLCJpc3MiOiJjbGllbnQ6cHl0aG9uOmFnZW50Omtlbm55MzEwNzg5OjowZGU0YjI5Mi0yYTBiLTQ2MjAtOGQ2NC03ZTg5MmE5ZWNmNTEiLCJpYXQiOjE2Njg4MDg3ODEsInJvbGUiOlsidXNlcl9hcGlfYWRtaW4iLCJ1c2VyX2FwaV9yZWFkIiwidXNlcl9hcGlfd3JpdGUiXSwiZ2VuZXJhbC1wdXJwb3NlIjp0cnVlLCJzYW1sIjp7fX0.4ZeDHss1_QTvxeCDJhVKG3OB6vWcMxKFRNCU5dZwBzfRtpn2kHrslBxQjr2hNnZZbZE0TOT7o0vLRTSnzcw7dw
+          DW_CACHE_DIR: /tmp/dw_cache/
+          DW_TMP_DIR: /tmp/dw_tmp/
+  GlueDataTransform:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub ${LokPrefix}-glue-data-transform
+      MaxCapacity: 1
+      Command:
+        Name: glueetl
+        PythonVersion: '3'
+        ScriptLocation: ./src/data_transform/glue_job.py
+      DefaultArguments:
+        '--source_bucket': !Ref LokBucketDataSourceName
+        '--output_bucket': !Ref LokBucketDataLakeName
+        '--region': !Ref AWS::Region
+      GlueVersion: '2.0'
+      Role: !Ref RegionalRole
+      Timeout: 180
+  GlueLokCrawler:
+    Type: AWS::Glue::Crawler
+    Properties: 
+      DatabaseName: !Sub ${LokPrefix}-db
+      Role: !Ref RegionalRole
+      Targets:
+        S3Targets:
+          - Path: !Sub s3://${LokBucketDataLakeName}/uber
+  GlueWorkflow:
+    Type: AWS::Glue::Workflow
+    Properties: 
+      MaxConcurrentRuns: 1
+      Name: !Sub ${LokPrefix}-workflow
+
+  LokDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId 
+      DatabaseInput: 
+        Name: !Sub ${LokPrefix}-db
+  TriggerCrawlerAggregated:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: !Sub ${LokPrefix}-trigger-crawler
+      Type: CONDITIONAL
+      StartOnCreation: true
+      WorkflowName: !Sub ${LokPrefix}-workflow
+      Actions:
+        - CrawlerName: !Ref GlueLokCrawler
+      Predicate:
+        Conditions:
+          - JobName: !Ref GlueDataTransform
+            LogicalOperator: EQUALS
+            State: SUCCEEDED
+  TriggerGlueWorkflow:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: !Sub ${LokPrefix}-trigger-workflow
+      Type: ON_DEMAND
+      WorkflowName: !Sub ${LokPrefix}-workflow
+      Actions:
+        - JobName: !Ref GlueDataTransform
+  MasterEncriptionKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Encryption key for all the messages
+      Enabled: true
+      EnableKeyRotation: false
+      KeyPolicy:
+        Version: "2012-10-17"
+        Id: key-default-1
+        Statement:
+          - Sid: Allow administration of the key
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action:
+              - kms:*
+            Resource: "*"
+          - Sid: Allow role to use the key
+            Effect: Allow
+            Principal:
+              Service:
+                - s3.amazonaws.com
+              AWS:
+                - !GetAtt RegionalRole.Arn
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+
+  KmsKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/${LokPrefix}-${AWS::Region}-kms-key
+      TargetKeyId: !GetAtt MasterEncriptionKey.Arn
