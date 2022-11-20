@@ -13,6 +13,7 @@ A data lake is a centralized repository that allows to store all structured and 
 ## Architecture
 
 The data lake was implemented using the services offered by AWS Cloud. This platform is cost-effective, scalable, and secure, and it offers a wide range of services and tools that can be used to build, monitor, and secure data lakes.
+
 All the resources needed by this workloads are handled by CloudFormation, an IaC solution which allows to configure and deploy resources through a template, writing the specification to your application environment in the same way you'd write a configuration file.
 The building automation consists of various steps described below.
 ![architecture](./png/loka_challenge_archi.png)
