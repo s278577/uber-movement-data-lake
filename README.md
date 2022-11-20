@@ -20,22 +20,24 @@ The building automation consists of various steps described below.
 
 ### Data Extraction and storage
 The extraction and storage in persistent place as s3 is performed as quickly and simply as possible using a AWS lambda, a serverless compute service that allows to run codes asynchronosusly, using the python library to work with data.world datasets (https://pypi.org/project/datadotworld/). 
-The lambda function stores data in its raw format and does not perform any further processing. This data will be used in the next steps for further processing.
+The lambda function stores data in its raw format into a s3 bucket and does not perform any further processing. This data will be used in the next steps for further processing.
+All the dependencies that are required are contained in the _requirements.txt_ file.
 
 ### Data Load and transformation
 There are some operations that can be performed to make the data lake more efficient:
 - **formatting**:
   A data warehouse is the final stage for data, therefore most reads are going to be analytical queries. Transforming the data to a columnar format such as parquet or ORC enables better compression of the data and the ability to access only specific columns, which reduces the amount of data scanned during querying time.
 - **partitioning**: 
-  Since the Data Lake should be optimized for searching, it is useful to partition the data so that you can search for the answer in the right place. When performing a query, you would like to scan as little data as possible in order to get results. Partitioning will navigate the query engine to the right place in which the data resides.
+  Since the data lake should be optimized for searching, it is useful to partition the data so that you can search for the answer in the right place. When performing a query, you would like to scan as little data as possible in order to get results. Partitioning will navigate the query engine to the right place in which the data resides.
 - **compaction**: 
   It is important to partition the data in order to improve the performance of the data lake using s3 as storage layer. However, this should be done in a way that does not generate a large number of small files.
 
-The process of  transforming raw data and loading into a data lake bucket is handled by a Glue Workflow. This workflow triggers a transformation Glue job, which in turn automatically runs a crawler once the job is completed. The crawler then adds a metadata layer populating the data catalog based on the data uploaded to s3 by the job.
+The process of transforming raw data and loading into a data lake bucket is handled by a Glue Workflow. This workflow triggers a transformation Glue job, which in turn automatically runs a crawler once the job is completed. The crawler then adds a metadata layer populating the data catalog based on the data uploaded to s3 by the job.
+
 The actions performed by the Glue job include:
 - converting data to columnar storage type parquet 
 - partitioning data by the city, the bucket path contains the city as prefix (_bucket://uber/{city}/file.parquet_) and the crawler will create one partition for each one
-- the "date_range" column is split into date_range_start, date_range_end, date_range_frequency and date_range_type, this enables searching for specific data ranges.
+- the "date_range" column is split into _date_range_start_, _date_range_end_, _date_range_frequency_ and _date_range_type_, this enables searching for specific data ranges.
 
 ### Data security
   Data security is ensured by:
@@ -51,3 +53,4 @@ The actions performed by the Glue job include:
 sam build
 sam deploy -g
 ```
+Please refer to AWS official documentation for further details: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/reference-sam-cli.html.
